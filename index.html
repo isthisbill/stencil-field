@@ -92,6 +92,17 @@ details[open] summary::after { content: "–"; }
 input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0; }
 .check { display: flex; gap: 8px; align-items: center; font-size: 13.5px; }
 .check input { accent-color: var(--accent); width: 16px; height: 16px; }
+.fontrow { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) 108px; gap: 8px; }
+.fontother { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; margin-top: 6px; }
+.fontother input { width: 100%; min-width: 0; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; }
+.fontother .btn { padding: 6px 14px; }
+.hint.bad { color: var(--accent); }
+.seg { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; }
+.seg button { border: 0; background: none; padding: 8px 4px; font: inherit; font-weight: 600; font-size: 12.5px; color: var(--muted); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--chip); color: var(--ink); }
+.seg i { display: block; border: 1.5px solid currentColor; border-radius: 2px; }
+.seg i.portrait { width: 11px; height: 15px; } .seg i.square { width: 13px; height: 13px; } .seg i.landscape { width: 16px; height: 11px; }
 .hint { font-size: 12px; color: var(--muted); margin: -4px 0 0; line-height: 1.35; }
 
 .colors { display: grid; gap: 6px; }
@@ -132,7 +143,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0; }
   .chip { width: 52px; height: 44px; }
   .swatch { grid-template-columns: 52px minmax(0,1fr) 36px; min-height: 48px; }
   .x { font-size: 22px; }
-  select, input[type="number"] { padding: 9px 10px; }
+  select, input[type="number"], .fontother input { padding: 9px 10px; }
+  .seg button { padding: 12px 4px; }
 }
 @media (min-width: 701px) and (max-width: 900px) { .app { grid-template-columns: 290px minmax(0, 1fr); } .stage { padding: 18px; } }
 
@@ -178,10 +190,18 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0; }
 </div>
 
 <script>
-const FONT = "Knewave";
+// Typefaces to try. Knewave is embedded (works offline); the rest load from Google Fonts when picked.
+const FONT_LIST = [
+  ["Knewave", 400], ["Titan One", 400], ["Bagel Fat One", 400], ["Chango", 400], ["Lilita One", 400],
+  ["Luckiest Guy", 400], ["Bowlby One", 400], ["Shrikhand", 400], ["Chewy", 400], ["Modak", 400],
+  ["Rubik Bubbles", 400], ["Sniglet", 800], ["Gluten", 800], ["Climate Crisis", 400], ["Rubik Mono One", 400],
+  ["Bungee", 400], ["Bangers", 400], ["Permanent Marker", 400], ["Dela Gothic One", 400], ["Anton", 400], ["Bebas Neue", 400],
+  ["Black Ops One", 400], ["Saira Stencil One", 400], ["Stardos Stencil", 400], ["Allerta Stencil", 400], ["Big Shoulders Stencil Display", 800],
+];
+const WEIGHTS = [[400,"Regular"],[700,"Bold"],[800,"Extra bold"],[900,"Black"]];
 
 const BASE = {
-  words: "EASY MORE NOW", squeeze: 1, tracking: 0.07,
+  words: "EASY MORE NOW", font: "Knewave", fontWeight: 400, squeeze: 1, tracking: 0.07,
   size: 0.95,
   aspect: 0.70, columns: 5, perColumn: 15, passes: 2, jitterX: 0.35, jitterY: 0.6,
   padding: 0.08,
@@ -231,9 +251,9 @@ let saveT; function save(){ clearTimeout(saveT); saveT=setTimeout(()=>{ try{loca
 /* ---------- measurement ---------- */
 const mctx = document.createElement("canvas").getContext("2d");
 const mcache = new Map();
-const fontStr = fs => `${fs}px "${FONT}", sans-serif`;
+const fontStr = fs => `${S.fontWeight} ${fs}px "${S.font}", sans-serif`;
 function measure(word){
-  const key = word;
+  const key = S.font+"|"+S.fontWeight+"|"+word;
   if (mcache.has(key)) return mcache.get(key);
   mctx.font = fontStr(100);
   const widths = [...word].map(ch => mctx.measureText(ch).width);
@@ -426,25 +446,50 @@ function draw(){
   ctx.setTransform(s*dpr,0,0,s*dpr,0,0);
   render(ctx);
 }
-const loaded = new Set();
-async function ensureFont(){
-  if (loaded.has(FONT)) return;
-  try { await document.fonts.ready; await document.fonts.load(fontStr(100), "EASYMORENOW"); } catch(e) {}
-  if (!document.fonts.check(fontStr(100))) return setTimeout(ensureFont, 200);
-  loaded.add(FONT); mcache.clear(); schedule();
+const loaded = new Set(), failed = new Set(), linked = new Map();
+function linkFont(family, weight){
+  if (family === "Knewave" && weight == 400) return Promise.resolve(true);
+  const key = family+"|"+weight;
+  if (!linked.has(key)) linked.set(key, new Promise(res => {
+    const l = document.createElement("link"); l.rel = "stylesheet";
+    l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(family).replace(/%20/g,"+") + (weight != 400 ? ":wght@"+weight : "") + "&display=block";
+    l.onload = () => res(true); l.onerror = () => { l.remove(); linked.delete(key); res(false); };
+    document.head.append(l);
+  }));
+  return linked.get(key);
 }
+function fontStatus(text, bad){ const p = document.getElementById("fontStatus"); if (p){ p.textContent = text; p.classList.toggle("bad", !!bad); } }
+async function ensureFont(){
+  const key = S.font+"|"+S.fontWeight;
+  if (loaded.has(key) || failed.has(key)) return;
+  if (S.font !== "Knewave") fontStatus(`Loading ${S.font}…`);
+  const ok = await linkFont(S.font, S.fontWeight);
+  let faces = [];
+  if (ok) { try { await document.fonts.ready; faces = await document.fonts.load(fontStr(100), "EASYMORENOW"); } catch(e) {} }
+  if (key !== S.font+"|"+S.fontWeight) return;   // the choice changed while this was loading
+  if (!faces.length){
+    failed.add(key);
+    const w = WEIGHTS.find(x => x[0] == S.fontWeight);
+    return fontStatus(`Couldn't load "${S.font}"${S.fontWeight != 400 ? " in "+w[1] : ""}. Check the name matches fonts.google.com exactly, try another weight, or check your internet connection.`, true);
+  }
+  loaded.add(key); mcache.clear(); schedule();
+  fontStatus(S.font === "Knewave" && S.fontWeight == 400 ? "Built in, works offline." : `${S.font} loaded from Google Fonts. Needs internet the first time.`);
+}
+function setFont(family, weight){ S.font = family; S.fontWeight = weight; failed.delete(family+"|"+weight); changed(); }
 function changed(){ save(); ensureFont(); schedule(); }
 
 /* ---------- controls ---------- */
 const pct = v => Math.round(v*100)+"%", num = d => v => (+v).toFixed(d), dg = v => v+"°";
 const GROUPS = [
   { title:"Copy", open:true, items:[
-    {type:"textarea", k:"words", label:"Words", hint:"Separate words with spaces, commas or new lines. Set in Knewave capitals, all at one size."},
+    {type:"textarea", k:"words", label:"Words", hint:"Separate words with spaces, commas or new lines. Set in capitals, all at one size."},
+    {type:"font"},
     {k:"size", label:"Type size (longest word ÷ column)", min:.3, max:1.8, step:.01, fmt:pct},
     {k:"squeeze", label:"Letter width", min:.5, max:1.4, step:.01, fmt:pct},
     {k:"tracking", label:"Letter spacing", min:-.2, max:.25, step:.005, fmt:num(3)},
   ]},
   { title:"Field", open:true, items:[
+    {type:"format"},
     {k:"columns", label:"Columns", min:1, max:12, step:1},
     {k:"perColumn", label:"Words per column", min:2, max:40, step:1},
     {k:"passes", label:"Stencil passes", min:1, max:5, step:1},
@@ -485,6 +530,8 @@ const GROUPS = [
 const el = (tag, props={}, kids=[]) => { const e = Object.assign(document.createElement(tag), props); kids.forEach(k=>e.append(k)); return e; };
 
 function control(spec){
+  if (spec.type === "font") return fontUI();
+  if (spec.type === "format") return formatUI();
   if (spec.type === "note") return el("p", {className:"hint", textContent:spec.text, style:"margin:0"});
   const id = "c-"+spec.k;
   if (spec.type === "check"){
@@ -561,10 +608,58 @@ function colorList(key, weighted){
   paint(); return box;
 }
 
+function fontUI(){
+  const known = FONT_LIST.some(f => f[0] === S.font);
+  const sel = el("select", {id:"c-font"});
+  FONT_LIST.forEach(([f]) => sel.append(el("option", {value:f, textContent: f === "Knewave" ? "Knewave (built in)" : f})));
+  sel.append(el("option", {value:"__other", textContent:"Other Google font…"}));
+  sel.value = known ? S.font : "__other";
+  const wt = el("select", {id:"c-fontWeight", ariaLabel:"Weight"});
+  WEIGHTS.forEach(([v,n]) => wt.append(el("option", {value:v, textContent:n})));
+  wt.value = S.fontWeight;
+  const name = el("input", {type:"text", id:"c-fontOther", value: known ? "" : S.font, placeholder:"Name as on fonts.google.com", autocapitalize:"words", spellcheck:false});
+  const go = el("button", {className:"btn", type:"button", textContent:"Load"});
+  const other = el("div", {className:"fontother", hidden: known}, [name, go]);
+  const loadOther = () => { const v = name.value.trim().replace(/\s+/g," "); if (v) setFont(v, +wt.value); };
+  sel.addEventListener("change", () => {
+    if (sel.value === "__other"){ other.hidden = false; name.focus(); return; }
+    other.hidden = true; wt.value = FONT_LIST.find(f => f[0] === sel.value)[1]; setFont(sel.value, +wt.value);
+  });
+  wt.addEventListener("change", () => setFont(S.font, +wt.value));
+  go.addEventListener("click", loadOther);
+  name.addEventListener("keydown", e => { if (e.key === "Enter") loadOther(); });
+  const status = el("p", {className:"hint", id:"fontStatus", style:"grid-column:1/-1;margin:2px 0 0"});
+  const wrap = el("div", {className:"ctl"}, [el("label", {htmlFor:"c-font", textContent:"Typeface"}), el("span"),
+    el("div", {className:"fontrow"}, [sel, wt]), other, status]);
+  return wrap;
+}
+
+function formatUI(){
+  const kind = S.aspect < .95 ? "portrait" : S.aspect > 1.05 ? "landscape" : "square";
+  const seg = el("div", {className:"seg", role:"group", ariaLabel:"Canvas format"});
+  for (const [k, label] of [["portrait","Portrait"],["square","Square"],["landscape","Landscape"]]){
+    const b = el("button", {type:"button"}, [el("i", {className:k}), label]);
+    b.setAttribute("aria-pressed", k === kind);
+    b.addEventListener("click", () => setFormat(k));
+    seg.append(b);
+  }
+  return el("div", {className:"ctl"}, [el("label", {textContent:"Format"}), el("span"), seg]);
+}
+function setFormat(kind){
+  const old = S.aspect, long = Math.max(old, 1/old), r = long < 1.05 ? 1/0.7 : long;
+  const a = kind === "portrait" ? 1/r : kind === "landscape" ? r : 1;
+  if (Math.abs(a-old) < .005) return;
+  // Height stays fixed, so scale the column count with the width to keep words the same size
+  S.columns = Math.max(1, Math.min(12, Math.round(S.columns*a/old)));
+  S.aspect = +a.toFixed(2); buildPanel(); changed();
+}
+
 function buildPanel(){
-  const panel = document.getElementById("panel"); panel.replaceChildren();
+  const panel = document.getElementById("panel");
+  const wasOpen = new Map([...panel.querySelectorAll("details")].map(d => [d.dataset.g, d.open]));
+  panel.replaceChildren();
   for (const g of GROUPS){
-    const d = el("details", {open:g.open}); d.append(el("summary", {textContent:g.title}));
+    const d = el("details", {open: wasOpen.has(g.title) ? wasOpen.get(g.title) : g.open}); d.dataset.g = g.title; d.append(el("summary", {textContent:g.title}));
     const body = el("div", {className:"group"});
     (g.items||[]).forEach(s => body.append(control(s)));
     if (g.custom === "orients") body.append(...orientsUI());
@@ -572,6 +667,8 @@ function buildPanel(){
     d.append(body); panel.append(d);
   }
   document.getElementById("seed").value = S.seed;
+  const key = S.font+"|"+S.fontWeight;
+  if (loaded.has(key)) fontStatus(S.font === "Knewave" && S.fontWeight == 400 ? "Built in, works offline." : `${S.font} loaded from Google Fonts. Needs internet the first time.`);
 }
 
 const presetSel = document.getElementById("preset");
